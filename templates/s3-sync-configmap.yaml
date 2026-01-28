@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: s3-sync-configmap
+  namespace: {{ .Values.s3syncnamespace }}  # Add the namespace here
+data:
+  S3_BUCKET: "{{ .Values.s3SyncConfigMap.S3_BUCKET }}"

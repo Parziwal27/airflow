@@ -1,0 +1,341 @@
+airflow:
+  defaultAffinity: {}
+  image:
+    repository: "#{app.REPOSITORY_URI_SERVICE}#"
+    tag: "#{app.IMAGE_TAG}#"
+    pullPolicy: IfNotPresent
+  executor: KubernetesExecutor
+  config:
+    AIRFLOW__METRICS__STATSD_ON: "True"
+    AIRFLOW__METRICS__STATSD_HOST: prometheus-prometheus-statsd-exporter.monitoring.svc.cluster.local
+    AIRFLOW__METRICS__STATSD_PORT: 9125
+    AIRFLOW__METRICS__STATSD_PREFIX: airflow
+    AIRFLOW__CORE__DAG_FILE_PROCESSOR_TIMEOUT: "360"
+    # AIRFLOW__SCHEDULER__SCHEDULER_HEALTH_CHECK_THRESHOLD: "360"
+    AIRFLOW__LOGGING__LOGGING_LEVEL: "INFO"
+    AIRFLOW__CORE__PARALLELISM: 150
+    AIRFLOW__CORE__DEFAULT_TIMEZONE: "Asia/Bangkok"
+    AIRFLOW__CORE__MAX_ACTIVE_TASKS_PER_DAG: "16"
+    AIRFLOW__CORE__DAGBAG_IMPORT_TIMEOUT: 600.0
+    AIRFLOW__SCHEDULER__DAG_FILE_PROCESSOR_TIMEOUT: 300
+    AIRFLOW__SCHEDULER__TASK_QUEUED_TIMEOUT: 3600.0
+    #AIRFLOW__SCHEDULER__PARSING_PROCESSES: 10
+    #AIRFLOW__SCHEDULER__SCHEDULER_IDLE_SLEEP_TIME: 0.5
+    #AIRFLOW__KUBERNETES_EXECUTOR__WORKER_PODS_CREATION_BATCH_SIZE: 20
+    AIRFLOW__WEBSERVER__DEFAULT_UI_TIMEZONE: "Asia/Bangkok"
+    AIRFLOW__WEBSERVER__LIMIT_REQUEST_LINE: "8190"
+    AIRFLOW__WEBSERVER__LIMIT_REQUEST_FIELD_SIZE: "8190"
+    AIRFLOW__SCHEDULER__MIN_FILE_PROCESS_INTERVAL: 60
+    AIRFLOW__SCHEDULER__DAG_DIR_LIST_INTERVAL: 120
+    AIRFLOW__API__AUTH_BACKENDS: "airflow.api.auth.backend.basic_auth"
+    AIRFLOW__WEBSERVER__SHOW_TRIGGER_FORM_IF_NO_PARAMS: "true"
+    AIRFLOW__WEBSERVER__WEB_SERVER_PROTOCOL: http
+    AIRFLOW__WEBSERVER__ENABLE_PROXY_FIX: 'true'
+    AIRFLOW__WEBSERVER__COOKIE_SECURE: 'False'
+    AIRFLOW__KUBERNETES_EXECUTOR__DELETE_WORKER_PODS_ON_FAILURE: "True"
+    AIRFLOW__LINEAGE__BACKEND: "airflow_provider_openmetadata.lineage.backend.OpenMetadataLineageBackend"
+    AIRFLOW__LINEAGE__OPENMETADATA_API_ENDPOINT: "http://empower-pryzm-catalogbackend.pryzm-airflow.svc.cluster.local:8585/api"
+    AIRFLOW__LINEAGE__JWT_TOKEN: "#{pryzm.pcb.token}#"
+  users:
+    - username: "#{airflow.admin.username}#"
+      password: "#{airflow.admin.password}#"
+      role: Admin
+      email: "#{airflow.admin.email}#"
+      firstName: admin
+      lastName: admin
+  connections:
+    - id: smtp_vib
+      type: smtp
+      description: SMTP server for email alerts.
+      host: #{foundation.smtp.host}#
+      port: #{foundation.smtp.port}#
+      login: #{foundation.smtp.user}#
+      password: ${SMTP_PASSWORD}
+      extra: |-
+        { 
+          "from_email": "#{foundation.smtp.user}#",
+          "disable_tls": true,
+          "disable_ssl": true,
+          "timeout": 30,
+          "retry_limit": 5 
+        }
+  connectionsTemplates:
+    ## extracts the value of `password` from `Secret/my-smtp-credentials`
+    SMTP_PASSWORD:
+      kind: secret
+      name: smtp-notification-password-secret
+      key: password
+  secret:
+    name: airflow-secret
+    namespace: #{aksNamespace}#
+    type: Opaque
+    data:
+      password: "#{airflow.admin.password}#"
+  variables:
+    - key: "UTC_TO_TIMEZONE"
+      value: "+7"
+    - key: "LINEAGE_API"
+      value: "http://empower-pryzmv2-incident360.pryzm-app.svc.cluster.local:5500"
+    - key: "SKIP_TEST_TABLES"
+      value: "sta_sv_crd_debt_interest"
+    - key: "EDP_ENV"
+      value: "#{foundation.airflow.env}#"
+      
+  extraEnv:
+    - name: AIRFLOW_VAR_APP_BASE_URL
+      value: http://empower-foundation-ingestion-backend.ingestion-app.svc.cluster.local
+    - name: AAD_CLIENT_ID
+      valueFrom:
+        secretKeyRef:
+          key: clientid
+          name: airflow-sso-secret
+    - name: AAD_CLIENT_SECRET
+      valueFrom:
+        secretKeyRef:
+          key: clientsecret
+          name: airflow-sso-secret
+    - name: AAD_TENANT_ID
+      valueFrom:
+        secretKeyRef:
+          key: tenantid
+          name: airflow-sso-secret
+    
+scheduler:
+  affinity:
+    podAntiAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 50
+        podAffinityTerm:
+          labelSelector:
+            matchLabels:
+              component: scheduler
+          topologyKey: "topology.kubernetes.io/zone"
+  hpa:
+    minReplicas: 2
+    maxReplicas: 15
+    cpu:
+      averageUtilization: 75
+    ram:
+      averageUtilization: 75
+  replicas: 4
+  resources:
+    requests:
+      memory: "2Gi"
+      cpu: "1000m"
+    limits:
+      memory: "4Gi"
+      cpu: "2000m"
+  logCleanup:
+    enabled: false
+web:
+  affinity:
+    podAntiAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 50
+        podAffinityTerm:
+          labelSelector:
+            matchLabels:
+              component: web
+          topologyKey: "topology.kubernetes.io/zone"
+  webserverConfig:
+    enabled: true
+    ## the full content of the `webserver_config.py` file (as a string)
+    stringOverride: |
+      from __future__ import annotations
+
+      import os
+
+      from airflow.www.fab_security.manager import AUTH_OAUTH
+      from airflow.auth.managers.fab.security_manager.override import FabAirflowSecurityManagerOverride
+      from airflow.utils.log.logging_mixin import LoggingMixin
+      from airflow.www.security import AirflowSecurityManager
+
+      basedir = os.path.abspath(os.path.dirname(__file__))
+
+      # Flask-WTF flag for CSRF
+      WTF_CSRF_ENABLED = True
+      WTF_CSRF_TIME_LIMIT = None
+      AAD_TENANT_ID = os.getenv("AAD_TENANT_ID")
+      AAD_CLIENT_ID = os.getenv("AAD_CLIENT_ID")
+      AAD_CLIENT_SECRET = os.getenv("AAD_CLIENT_SECRET")
+
+      AUTH_TYPE = AUTH_OAUTH
+
+      OAUTH_PROVIDERS = [{
+          'name':'azure',
+          'token_key':'access_token',
+          'icon':'fa-windows',
+          'remote_app': {
+              'api_base_url': f"https://login.microsoftonline.com/{AAD_TENANT_ID}/",
+              'request_token_url': None,
+              'request_token_params': {
+                  'scope': 'openid email profile'
+              },
+              'access_token_url': f"https://login.microsoftonline.com/{AAD_TENANT_ID}/oauth2/v2.0/token",
+              "access_token_params": {
+                  'scope': 'openid email profile'
+              },
+              'authorize_url': f"https://login.microsoftonline.com/{AAD_TENANT_ID}/oauth2/v2.0/authorize",
+              "authorize_params": {
+                  'scope': 'openid email profile'
+              },
+              'client_id': f"{AAD_CLIENT_ID}",
+              'client_secret': f"{AAD_CLIENT_SECRET}",
+              'jwks_uri': 'https://login.microsoftonline.com/common/discovery/v2.0/keys',
+          }
+      }]
+
+      AUTH_USER_REGISTRATION_ROLE = "Public"
+      AUTH_USER_REGISTRATION = True
+      AUTH_ROLES_SYNC_AT_LOGIN = False
+      # First you MUST create an Azure App Registration
+      # Secondly, you create a role like "Admin with value Admin" in the App Registration "App Roles" section in the Azure Portal under Microsoft Entra ID.
+      # Then you have groups and they MUST be linked from the Microsoft Entra ID "Enterprise Application" section in the Azure Portal under the "Users and Groups" section of the Enterprise Application you created.
+      # Each groups or users MUST be assigned a role e.g.: Admin, Op, Viewer in the "Users and Groups"
+      AUTH_ROLES_MAPPING = {
+          "Admin": ["Admin"]
+      }
+
+      class AzureCustomSecurity(AirflowSecurityManager):
+          def get_oauth_user_info(self, provider, response=None):
+              self.log.debug(f"Parsing JWT token for provider : {provider}")
+
+              try:   # the try and except are optional - strictly you only need the me= line.
+                  me = super().get_oauth_user_info(provider, response)
+              except Exception as e:
+                  import traceback
+                  traceback.print_exc()
+                  self.log.debug(e)
+
+              self.log.debug(f"Parse JWT token : {me}")
+              return {
+                  "name": me["first_name"] + " " + me["last_name"],
+                  "email": me["email"],
+                  "first_name": me["first_name"],
+                  "last_name": me["last_name"],
+                  "id": me["username"],
+                  "username": me["email"],
+                  "role_keys": me.get("role_keys")
+              }
+
+      # the first of these two appears to work with older Airflow versions, the latter newer.
+      FAB_SECURITY_MANAGER_CLASS = 'webserver_config.AzureCustomSecurity'
+      SECURITY_MANAGER_CLASS = AzureCustomSecurity
+
+  extraVolumes:
+  extraVolumeMounts:
+  hpa:
+    minReplicas: 2
+    maxReplicas: 4
+    cpu:
+      averageUtilization: 80
+    ram:
+      averageUtilization: 80
+  config:
+    secure_xsrf: "True"
+  service:
+    annotations:
+      service.beta.kubernetes.io/azure-load-balancer-internal: "true"
+    sessionAffinity: "None"
+    sessionAffinityConfig: {}
+    type: LoadBalancer
+    externalPort: 80
+    loadBalancerIP: ""
+    loadBalancerSourceRanges: []
+    nodePort:
+      http: ""
+  replicas: 2
+  resources:
+    requests:
+      memory: "2Gi"
+      cpu: "1"
+triggerer:
+  enabled: false
+pgbouncer:
+    enabled: true
+    image:
+      repository:  #{ecrRepo}#/#{foundation.airflow.pgbouncerRepo}#
+      tag: #{foundation.airflow.pgbouncerTag}#
+      pullPolicy: IfNotPresent
+    podDisruptionBudget:
+      enabled: true
+      minAvailable: 1
+postgresql:
+  enabled: false
+workers:
+  enabled: false
+redis:
+  enabled: false
+flower:
+  enabled: false
+logs:
+  path: /opt/airflow/logs
+  persistence:
+    enabled: true
+    storageClass: azurefile-csi
+    size: 10Gi
+dags:
+  path: /opt/airflow/dags
+  persistence:
+    enabled: true
+    storageClass: azurefile-csi
+    accessMode: ReadWriteMany
+    size: 5Gi
+externalDatabase:
+  type: postgres
+  host: ""
+  port: ""
+  database: ""
+  user: ""
+  userSecret: ""
+  userSecretKey: ""
+  password: ""
+  passwordSecret: ""
+  passwordSecretKey: ""
+  properties: ""
+##################################################
+##################################################
+s3SyncConfigMap:
+  S3_BUCKET: ""
+s3syncnamespace: "#{aksNamespace}#"
+s3sidecarimage: ""
+s3sidecarResources:
+  resources:
+    requests:
+      memory: "750Mi"
+      cpu: "750m"
+####################################################
+##################################################
+
+###################################################
+###################################################
+# rdspassword:
+#   secret:
+#     name: rds-password-secret
+#     namespace: airflow
+#     type: Opaque
+#     data:
+#       password: '#{airflow.db.password}#'
+###################################################
+###################################################
+
+clusterRole:
+  name: vib-pods-list
+
+clusterRoleBinding:
+  name: vib-pods-list
+  serviceAccount:
+    name: default
+    namespace: #{aksNamespace}#
+  roleRef:
+    name: vib-pods-list
+
+sp:
+  path: /opt/airflow/storedprocedure
+  persistence:
+    enabled: enable
+    existingClaim: ""
+    subPath: ""
+    storageClass: "azurefile-csi"
+    accessMode: ReadWriteMany
+    size: 2Gi

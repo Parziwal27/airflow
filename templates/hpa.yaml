@@ -1,0 +1,53 @@
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "airflow.fullname" . }}-scheduler
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "airflow.fullname" . }}-scheduler
+  minReplicas: {{ .Values.scheduler.hpa.minReplicas }}
+  maxReplicas: {{ .Values.scheduler.hpa.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.scheduler.hpa.cpu.averageUtilization }}
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.scheduler.hpa.ram.averageUtilization }}
+
+---
+
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "airflow.fullname" . }}-web
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "airflow.fullname" . }}-web
+  minReplicas: {{ .Values.web.hpa.minReplicas }}
+  maxReplicas: {{ .Values.web.hpa.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.web.hpa.cpu.averageUtilization }}
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.web.hpa.ram.averageUtilization }}
+
+---
