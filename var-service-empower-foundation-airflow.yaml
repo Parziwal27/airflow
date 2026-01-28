@@ -84,21 +84,6 @@ airflow:
   extraEnv:
     - name: AIRFLOW_VAR_APP_BASE_URL
       value: http://empower-foundation-ingestion-backend.ingestion-app.svc.cluster.local
-    - name: AAD_CLIENT_ID
-      valueFrom:
-        secretKeyRef:
-          key: clientid
-          name: airflow-sso-secret
-    - name: AAD_CLIENT_SECRET
-      valueFrom:
-        secretKeyRef:
-          key: clientsecret
-          name: airflow-sso-secret
-    - name: AAD_TENANT_ID
-      valueFrom:
-        secretKeyRef:
-          key: tenantid
-          name: airflow-sso-secret
     
 scheduler:
   affinity:
@@ -138,89 +123,7 @@ web:
               component: web
           topologyKey: "topology.kubernetes.io/zone"
   webserverConfig:
-    enabled: true
-    ## the full content of the `webserver_config.py` file (as a string)
-    stringOverride: |
-      from __future__ import annotations
-
-      import os
-
-      from airflow.www.fab_security.manager import AUTH_OAUTH
-      from airflow.auth.managers.fab.security_manager.override import FabAirflowSecurityManagerOverride
-      from airflow.utils.log.logging_mixin import LoggingMixin
-      from airflow.www.security import AirflowSecurityManager
-
-      basedir = os.path.abspath(os.path.dirname(__file__))
-
-      # Flask-WTF flag for CSRF
-      WTF_CSRF_ENABLED = True
-      WTF_CSRF_TIME_LIMIT = None
-      AAD_TENANT_ID = os.getenv("AAD_TENANT_ID")
-      AAD_CLIENT_ID = os.getenv("AAD_CLIENT_ID")
-      AAD_CLIENT_SECRET = os.getenv("AAD_CLIENT_SECRET")
-
-      AUTH_TYPE = AUTH_OAUTH
-
-      OAUTH_PROVIDERS = [{
-          'name':'azure',
-          'token_key':'access_token',
-          'icon':'fa-windows',
-          'remote_app': {
-              'api_base_url': f"https://login.microsoftonline.com/{AAD_TENANT_ID}/",
-              'request_token_url': None,
-              'request_token_params': {
-                  'scope': 'openid email profile'
-              },
-              'access_token_url': f"https://login.microsoftonline.com/{AAD_TENANT_ID}/oauth2/v2.0/token",
-              "access_token_params": {
-                  'scope': 'openid email profile'
-              },
-              'authorize_url': f"https://login.microsoftonline.com/{AAD_TENANT_ID}/oauth2/v2.0/authorize",
-              "authorize_params": {
-                  'scope': 'openid email profile'
-              },
-              'client_id': f"{AAD_CLIENT_ID}",
-              'client_secret': f"{AAD_CLIENT_SECRET}",
-              'jwks_uri': 'https://login.microsoftonline.com/common/discovery/v2.0/keys',
-          }
-      }]
-
-      AUTH_USER_REGISTRATION_ROLE = "Public"
-      AUTH_USER_REGISTRATION = True
-      AUTH_ROLES_SYNC_AT_LOGIN = False
-      # First you MUST create an Azure App Registration
-      # Secondly, you create a role like "Admin with value Admin" in the App Registration "App Roles" section in the Azure Portal under Microsoft Entra ID.
-      # Then you have groups and they MUST be linked from the Microsoft Entra ID "Enterprise Application" section in the Azure Portal under the "Users and Groups" section of the Enterprise Application you created.
-      # Each groups or users MUST be assigned a role e.g.: Admin, Op, Viewer in the "Users and Groups"
-      AUTH_ROLES_MAPPING = {
-          "Admin": ["Admin"]
-      }
-
-      class AzureCustomSecurity(AirflowSecurityManager):
-          def get_oauth_user_info(self, provider, response=None):
-              self.log.debug(f"Parsing JWT token for provider : {provider}")
-
-              try:   # the try and except are optional - strictly you only need the me= line.
-                  me = super().get_oauth_user_info(provider, response)
-              except Exception as e:
-                  import traceback
-                  traceback.print_exc()
-                  self.log.debug(e)
-
-              self.log.debug(f"Parse JWT token : {me}")
-              return {
-                  "name": me["first_name"] + " " + me["last_name"],
-                  "email": me["email"],
-                  "first_name": me["first_name"],
-                  "last_name": me["last_name"],
-                  "id": me["username"],
-                  "username": me["email"],
-                  "role_keys": me.get("role_keys")
-              }
-
-      # the first of these two appears to work with older Airflow versions, the latter newer.
-      FAB_SECURITY_MANAGER_CLASS = 'webserver_config.AzureCustomSecurity'
-      SECURITY_MANAGER_CLASS = AzureCustomSecurity
+    enabled: false
 
   extraVolumes:
   extraVolumeMounts:
